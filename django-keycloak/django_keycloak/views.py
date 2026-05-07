@@ -1,185 +1,117 @@
-# -*- coding: utf-8 -*-
-from __future__ import unicode_literals
-
 import logging
-
-from django.shortcuts import resolve_url
-
-from django_keycloak.services.oidc_profile import get_remote_user_model
-
-try:
-    from urllib.parse import urljoin  # noqa: F401
-except ImportError:
-    from urlparse import urljoin  # noqa: F401
+import secrets
 
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.http.response import (
     HttpResponseBadRequest,
+    HttpResponseRedirect,
     HttpResponseServerError,
-    HttpResponseRedirect
 )
+from django.shortcuts import resolve_url
 from django.urls.base import reverse
-from django.views.generic.base import (
-    RedirectView,
-    TemplateView
-)
-
-from django_keycloak.models import Nonce, Server, Client, Realm
-from django_keycloak.auth import remote_user_login
-from urllib.parse import urlencode
-
+from django.views.generic.base import RedirectView
 
 logger = logging.getLogger(__name__)
 
 
+SESSION_STATE_KEY = "oidc_state"
+SESSION_NEXT_PATH_KEY = "oidc_next_path"
+
+
 class Login(RedirectView):
-
     def get_redirect_url(self, *args, **kwargs):
+        state = secrets.token_urlsafe(32)
+        redirect_uri = self.request.build_absolute_uri(
+            location=reverse("keycloak_login_complete")
+        )
 
-        nonce = Nonce.objects.create(
-            redirect_uri=self.request.build_absolute_uri(
-                location=reverse('keycloak_login_complete')),
-            next_path=self.request.GET.get('next'))
+        self.request.session[SESSION_STATE_KEY] = state
+        self.request.session[SESSION_NEXT_PATH_KEY] = self.request.GET.get(
+            "next"
+        )
 
-        self.request.session['oidc_state'] = str(nonce.state)
-
-        authorization_url = self.request.realm.client.openid_api_client\
-            .authorization_url(
-                redirect_uri=nonce.redirect_uri,
-                scope='openid profile email', # modified from 'openid given_name family_name email' to fix invaild scopes issue https://github.com/oauth2-proxy/oauth2-proxy/issues/1448
-                state=str(nonce.state)
+        authorization_url = (
+            self.request.realm.client.openid_api_client.authorization_url(
+                redirect_uri=redirect_uri,
+                # See upstream note: 'openid given_name family_name email'
+                # produced "invalid_scope" against newer Keycloak releases.
+                # https://github.com/oauth2-proxy/oauth2-proxy/issues/1448
+                scope="openid profile email",
+                state=state,
             )
+        )
 
         if self.request.realm.server.internal_url:
             authorization_url = authorization_url.replace(
                 self.request.realm.server.internal_url,
                 self.request.realm.server.url,
-                1
+                1,
             )
 
         logger.debug(authorization_url)
-
         return authorization_url
 
 
 class LoginComplete(RedirectView):
-
     def get(self, *args, **kwargs):
         request = self.request
 
-        if 'error' in request.GET:
-            return HttpResponseServerError(request.GET['error'])
+        if "error" in request.GET:
+            return HttpResponseServerError(request.GET["error"])
 
-        if 'code' not in request.GET and 'state' not in request.GET:
+        if "code" not in request.GET or "state" not in request.GET:
             return HttpResponseBadRequest()
 
-        if 'oidc_state' not in request.session \
-                or request.GET['state'] != request.session['oidc_state']:
-            # Missing or incorrect state; login again.
-            return HttpResponseRedirect(reverse('keycloak_login'))
+        expected_state = request.session.pop(SESSION_STATE_KEY, None)
+        next_path = request.session.pop(SESSION_NEXT_PATH_KEY, None)
 
-        nonce = Nonce.objects.get(state=request.GET['state'])
+        if not expected_state or request.GET["state"] != expected_state:
+            return HttpResponseRedirect(reverse("keycloak_login"))
 
-        user = authenticate(request=request,
-                            code=request.GET['code'],
-                            redirect_uri=nonce.redirect_uri)
+        redirect_uri = request.build_absolute_uri(
+            location=reverse("keycloak_login_complete")
+        )
 
-        RemoteUserModel = get_remote_user_model()
-        if isinstance(user, RemoteUserModel):
-            remote_user_login(request, user)
-        else:
-            login(request, user)
+        user = authenticate(
+            request=request,
+            code=request.GET["code"],
+            redirect_uri=redirect_uri,
+        )
+        if user is None:
+            return HttpResponseRedirect(reverse("keycloak_login"))
 
-        nonce.delete()
+        login(request, user)
 
         if settings.LOGIN_REDIRECT_URL:
-            return HttpResponseRedirect(resolve_url(settings.LOGIN_REDIRECT_URL))
-
-        return HttpResponseRedirect(nonce.next_path or '/')
+            return HttpResponseRedirect(
+                resolve_url(settings.LOGIN_REDIRECT_URL)
+            )
+        return HttpResponseRedirect(next_path or "/")
 
 
 class Logout(RedirectView):
-
     def get_redirect_url(self, *args, **kwargs):
-        if hasattr(self.request.user, 'oidc_profile'):
+        if hasattr(self.request.user, "oidc_profile"):
+            profile = self.request.user.oidc_profile
             self.request.realm.client.openid_api_client.logout(
-                self.request.user.oidc_profile.refresh_token
+                profile.refresh_token
             )
-            self.request.user.oidc_profile.access_token = None
-            self.request.user.oidc_profile.expires_before = None
-            self.request.user.oidc_profile.refresh_token = None
-            self.request.user.oidc_profile.refresh_expires_before = None
-            self.request.user.oidc_profile.save(update_fields=[
-                'access_token',
-                'expires_before',
-                'refresh_token',
-                'refresh_expires_before'
-            ])
+            profile.access_token = None
+            profile.expires_before = None
+            profile.refresh_token = None
+            profile.refresh_expires_before = None
+            profile.save(
+                update_fields=[
+                    "access_token",
+                    "expires_before",
+                    "refresh_token",
+                    "refresh_expires_before",
+                ]
+            )
 
         logout(self.request)
 
         if settings.LOGOUT_REDIRECT_URL:
             return resolve_url(settings.LOGOUT_REDIRECT_URL)
-
-        return reverse('keycloak_login')
-
-
-class SessionIframe(TemplateView):
-    template_name = 'django_keycloak/session_iframe.html'
-
-    @property
-    def op_location(self):
-        realm = self.request.realm
-        if realm.server.internal_url:
-            return realm.well_known_oidc['check_session_iframe'].replace(
-                realm.server.internal_url,
-                realm.server.url,
-                1
-            )
-        return realm.server.url
-
-    @property
-    def client_id(self):
-        if not hasattr(self.request, 'realm'):
-            return None
-
-        realm = self.request.realm
-        return realm.client.client_id
-
-    def get_context_data(self, **kwargs):
-        return super(SessionIframe, self).get_context_data(
-            client_id=self.client_id,
-            identity_server=self.request.realm.server.url,
-            op_location=self.op_location,
-            cookie_name=getattr(settings, 'KEYCLOAK_SESSION_STATE_COOKIE_NAME',
-                                'session_state')
-        )
-
-
-class Register(RedirectView):
-    """Generate link for user registration with Keycloak."""
-
-    def get_redirect_url(self, *args, **kwargs):
-        server = Server.objects.last()
-        realm = Realm.objects.last()
-        client = Client.objects.last()
-        lang = self.request.GET.get('lang')
-
-        keycloack_register_url = f"{server.url.rstrip('/')}/realms/{realm.name}/protocol/openid-connect/registrations"
-
-        registration_url = (
-            keycloack_register_url
-            + "?"
-            + urlencode(
-                {
-                    "client_id": client.client_id,
-                    "response_type": "code",
-                    "scope": "openid email",
-                    "redirect_uri": self.request.build_absolute_uri(location=reverse('keycloak_login')),
-                    "kc_locale": lang if lang else 'ar',
-                }
-            )
-        )
-
-        return registration_url
+        return reverse("keycloak_login")
