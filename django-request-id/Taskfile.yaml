@@ -1,0 +1,78 @@
+version: "3"
+
+
+vars:
+  PACKAGE_NAME: request_id
+  DIST_DIR: "{{.ROOT_DIR}}/django-request-id/dist"
+
+
+tasks:
+  default:
+    desc: Show available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  deps:
+    desc: Sync workspace dependencies into .venv
+    cmds:
+      - task: :deps
+
+  test:
+    desc: Run the django-request-id test suite
+    deps: [deps]
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" pytest
+
+  test:unit:
+    desc: Run unit tests only
+    deps: [deps]
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" pytest tests -m "not integration"
+
+  test:coverage:
+    desc: Run tests with a coverage report
+    deps: [deps]
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" --with coverage pytest --cov={{.PACKAGE_NAME}} --cov-report=term-missing
+
+  lint:
+    desc: Lint django-request-id sources
+    deps: [deps]
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" ruff check .
+
+  fmt:
+    desc: Format django-request-id sources and auto-fix lint
+    deps: [deps]
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" ruff format .
+      - uv run --project "{{.ROOT_DIR}}" ruff check --fix .
+
+  build:
+    desc: Build sdist and wheel into dist/
+    deps: [deps]
+    generates:
+      - "{{.DIST_DIR}}/*"
+    cmds:
+      - uv build --out-dir "{{.DIST_DIR}}"
+
+  demo:
+    desc: Run the bundled ASGI demo via uvicorn
+    deps: [deps]
+    preconditions:
+      - sh: test -f demo.py
+        msg: demo.py is missing from the addon directory
+    cmds:
+      - uv run --project "{{.ROOT_DIR}}" --extra demo uvicorn demo:application --reload
+
+  clean:
+    desc: Remove build artifacts and caches for this addon
+    silent: true
+    cmds:
+      - cmd: |-
+          rm -rf "{{.DIST_DIR}}" .pytest_cache .ruff_cache .coverage
+          find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+        platforms: [linux, darwin]
+      - cmd: powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '{{.DIST_DIR}}','.pytest_cache','.ruff_cache','.coverage'"
+        platforms: [windows]

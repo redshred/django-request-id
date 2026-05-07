@@ -4,7 +4,6 @@ import asyncio
 
 from django.http import JsonResponse
 from django.urls import path
-
 from request_id import get_current_request_id
 
 

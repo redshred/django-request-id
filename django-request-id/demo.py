@@ -71,7 +71,6 @@ django.setup()
 from django.core.asgi import get_asgi_application
 from django.urls import path
 from django.views.generic.base import TemplateView
-
 from request_id import get_current_request_id
 from request_id.asgi import AddRequestIdHeaderMiddleware
 

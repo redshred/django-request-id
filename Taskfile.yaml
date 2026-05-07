@@ -1,0 +1,89 @@
+version: "3"
+
+
+vars:
+  WORKSPACE_NAME: django-addons
+
+
+includes:
+  request-id:
+    taskfile: ./django-request-id/Taskfile.yaml
+    dir: ./django-request-id
+    aliases: [rid]
+
+
+tasks:
+  default:
+    desc: Show available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  setup:
+    desc: Initial workspace setup
+    deps: [deps]
+
+  deps:
+    desc: Sync workspace dependencies into .venv
+    sources:
+      - pyproject.toml
+      - uv.lock
+      - "*/pyproject.toml"
+    preconditions:
+      - sh: command -v uv
+        msg: "uv is not installed. See https://docs.astral.sh/uv/getting-started/installation/"
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Lint all workspace code
+    deps: [deps]
+    cmds:
+      - uv run ruff check
+
+  fmt:
+    desc: Format all workspace code and auto-fix lint
+    deps: [deps]
+    cmds:
+      - uv run ruff format
+      - uv run ruff check --fix
+
+  test:
+    desc: Run tests for every workspace member
+    cmds:
+      - task: request-id:test
+
+  build:
+    desc: Build distribution artifacts for every workspace member
+    cmds:
+      - task: request-id:build
+
+  check:
+    desc: Run all quality checks (lint + test)
+    deps: [lint, test]
+
+  ci:
+    desc: CI pipeline entrypoint
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  clean:
+    desc: Remove caches and build artifacts across the workspace
+    silent: true
+    cmds:
+      - task: request-id:clean
+      - cmd: rm -rf .pytest_cache .ruff_cache
+        platforms: [linux, darwin]
+      - cmd: powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '.pytest_cache','.ruff_cache'"
+        platforms: [windows]
+
+  clean:venv:
+    desc: Remove the workspace virtualenv and lockfile-generated state
+    silent: true
+    cmds:
+      - cmd: rm -rf .venv
+        platforms: [linux, darwin]
+      - cmd: powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '.venv'"
+        platforms: [windows]

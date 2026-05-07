@@ -1,0 +1,73 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+## TO USE
+# > cd {REPOSITORY_ROOT}
+# > pre-commit install
+
+# Use command line OR any git gui interface
+# > git commit -am "This is my very descriptive and helpful message"
+
+default_language_version:
+  python: python3.12
+
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=8192"] # 8MB
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-xml
+      - id: check-yaml
+        name: Checking yaml syntax
+        args: ["--allow-multiple-documents"]
+      - id: debug-statements
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: name-tests-test
+        exclude: "^django-request-id/tests/(__init__|settings|urls)\\.py$"
+        args: ["--pytest-test-first"]
+      - id: no-commit-to-branch
+        args: ["--branch", "master", "--pattern", "release/.*"]
+
+  # ruff: lint + format, driven by [tool.ruff] in the workspace pyproject
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]
+      - id: ruff
+        name: ruff-fix-imports
+        args: [--fix, --select, "I"]
+      - id: ruff
+        verbose: true
+        types_or: [python, pyi, jupyter]
+
+  # pytest on push only since the suite may grow
+  - repo: local
+    hooks:
+      - id: pytest-push
+        name: pytest-push
+        entry: task rid:test
+        types: [python]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+        language: system
+        verbose: true

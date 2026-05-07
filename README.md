@@ -1,4 +1,4 @@
-# django-addons
+create # django-addons
 
 A uv workspace housing reusable Django addons maintained by Redshred.
 
