@@ -1,0 +1,50 @@
+name: Publish to Artifact Registry
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each entry maps to the addon's Taskfile namespace in the root
+        # Taskfile (e.g. `task keycloak:publish`).
+        package:
+          - keycloak
+          - request-id
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install task
+        uses: arduino/setup-task@v2
+        with:
+          version: "3.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Publish ${{ matrix.package }}
+        env:
+          UV_PUBLISH_URL: https://${{ vars.GAR_LOCATION }}-python.pkg.dev/${{ vars.GAR_PROJECT }}/${{ vars.GAR_REPOSITORY }}/
+          UV_PUBLISH_USERNAME: oauth2accesstoken
+          UV_PUBLISH_PASSWORD: ${{ steps.auth.outputs.access_token }}
+        run: task ${{ matrix.package }}:publish

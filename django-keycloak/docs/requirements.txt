@@ -1,6 +1,0 @@
-docutils
-Jinja2
-MarkupSafe
-Pygments
-Sphinx
-sphinx_rtd_theme

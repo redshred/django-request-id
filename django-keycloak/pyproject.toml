@@ -1,6 +1,6 @@
 [project]
 name = "django-keycloak"
-version = "0.3.0"
+version = "1.0.0a2"
 description = "Async-aware Django integration for Keycloak (Redshred fork of skamansam/django-keycloak)"
 readme = "README.rst"
 license = { file = "LICENSE" }
@@ -31,7 +31,8 @@ classifiers = [
 ]
 dependencies = [
     "django>=5.1",
-    "python-keycloak-client>=0.2.3",
+    "aiohttp>=3.10",
+    "python-jose[cryptography]>=3.3",
 ]
 
 [project.urls]
@@ -55,6 +56,7 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "django_keycloak.tests.settings"
-python_files = ["tests.py", "test_*.py", "*_tests.py"]
-testpaths = ["django_keycloak/tests"]
+DJANGO_SETTINGS_MODULE = "keycloak_tests.settings"
+python_files = ["test_*.py"]
+testpaths = ["keycloak_tests"]
+asyncio_mode = "auto"
